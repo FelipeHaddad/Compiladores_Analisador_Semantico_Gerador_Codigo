@@ -82,7 +82,7 @@ typedef struct {
 
 //   TABELA DE SÍMBOLOS (Hash)
 
-#define PRIME_NUMER 211 // numero primo para reduzir colisoes
+#define PRIME_NUMER 211
 #define MAX_PARAMETROS 32
 
 typedef enum {
@@ -95,15 +95,13 @@ typedef enum {
 typedef struct _TNo{
    char ID[16];
    int endereço;
-   // aqui você deve declarar os outros campos que julgar necessário para
-   // armazenar os identificadores
    TCategoria categoria;
-   int escopo;                          // 0 global, 1 local
-   int ativo;                           // 0 depois que o escopo local da rotina foi fechado
-   int por_referencia;                  // parametro declarado com var
-   int rotulo;                          // rotulo Lk da funcao/procedimento
+   int escopo;                          
+   int ativo;                           
+   int por_referencia;                  
+   int rotulo;                          
    int num_parametros;
-   int parametros_ref[MAX_PARAMETROS];  // modo de cada parametro (1 = var)
+   int parametros_ref[MAX_PARAMETROS]; 
 
    struct _TNo *prox;
 }TNo;
@@ -119,6 +117,8 @@ int linha_atual = 1;
 TInfoAtomo lookahead;
 TTabelaSimbolos tabela;
 int escopo_atual = 0;
+int endereco_atual = 0;
+TNo *rotina_atual = NULL;
 
 //  PROTÓTIPOS DAS FUNÇÕES
 
@@ -132,6 +132,7 @@ int hashMack(char *s);
 // Funções da Tabela de Símbolos
 TNo* insere(char *id, TCategoria categoria, int endereco, int linha);
 TNo* busca(char *id);
+TNo* verifica_declarado(TInfoAtomo info);
 void fecha_escopo(void);
 void imprime_tabela(void);
 void libera_tabela(void);
@@ -140,12 +141,12 @@ void libera_tabela(void);
 void programa(void);
 void bloco(void);
 void declaracao_variaveis(void);
-void lista_variaveis(void);
+void lista_variaveis(TCategoria categoria, int por_referencia);
 void declaracao_de_rotinas(void);
 void declaracao_de_funcao(void);
 void declaracao_de_procedimento(void);
 void tipo(void);
-void parametros_formais(void);
+void parametros_formais(TNo *rotina);
 void parametro_formal(void);
 void comando_composto(void);
 void comando(void);
@@ -153,7 +154,8 @@ void comando_entrada(void);
 void comando_saida(void);
 void comando_condicional(void);
 void comando_repeticao(void);
-void lista_expressao(void);
+int lista_expressao(TNo *rotina);
+void argumento(TNo *rotina, int indice);
 void expressao(void);
 void operador_relacional(void);
 void expressao_simples(void);
@@ -249,9 +251,8 @@ void erro_semantico(int linha, const char *id, const char *msg) {
     exit(1);
 }
 
-//   TABELA DE SÍMBOLOS (insere, busca, fecha_escopo, imprime e libera)
+//   TABELA DE SÍMBOLOS
 
-// Insere no início da lista da entrada hashMack(id); erro se o ID já existe no escopo atual
 TNo* insere(char *id, TCategoria categoria, int endereco, int linha) {
     int entrada = hashMack(id);
     for (TNo *no = tabela.entradas[entrada]; no != NULL; no = no->prox) {
@@ -272,7 +273,6 @@ TNo* insere(char *id, TCategoria categoria, int endereco, int linha) {
     return novo;
 }
 
-// Locais são inseridos depois dos globais, então ficam antes na lista e são achados primeiro
 TNo* busca(char *id) {
     for (TNo *no = tabela.entradas[hashMack(id)]; no != NULL; no = no->prox) {
         if (no->ativo && strcmp(no->ID, id) == 0) {
@@ -282,7 +282,14 @@ TNo* busca(char *id) {
     return NULL;
 }
 
-// Fim de rotina: locais e parâmetros ficam inativos, mas continuam na tabela para a impressão final
+TNo* verifica_declarado(TInfoAtomo info) {
+    TNo *no = busca(info.atributo.id);
+    if (no == NULL) {
+        erro_semantico(info.linha, info.atributo.id, "nao declarado");
+    }
+    return no;
+}
+
 void fecha_escopo(void) {
     for (int i = 0; i < PRIME_NUMER; i++) {
         for (TNo *no = tabela.entradas[i]; no != NULL; no = no->prox) {
@@ -553,7 +560,6 @@ TInfoAtomo obter_atomo(void) {
 void consome(TAtomo atomo_esperado) {
     if (lookahead.atomo == atomo_esperado) {
         lookahead = obter_atomo();
-        // Ignora comentários
         while (lookahead.atomo == ATOMO_COMENTARIO) {
             lookahead = obter_atomo();
         }
@@ -580,23 +586,30 @@ void bloco(void) {
 
 // <declaração_variáveis> ::= [ var <lista_variaveis> ';' { <lista_variaveis> ';' } ]
 void declaracao_variaveis(void) {
+    endereco_atual = 0;
     if (lookahead.atomo == ATOMO_VAR) {
         consome(ATOMO_VAR);
-        lista_variaveis();
+        lista_variaveis(CAT_VARIAVEL, 0);
         consome(ATOMO_PONTO_VIRGULA);
         while (lookahead.atomo == ATOMO_IDENTIFICADOR) {
-            lista_variaveis();
+            lista_variaveis(CAT_VARIAVEL, 0);
             consome(ATOMO_PONTO_VIRGULA);
         }
     }
 }
 
 // <lista_variaveis> ::= identificador { ',' identificador } ':' <tipo>
-void lista_variaveis(void) {
-    consome(ATOMO_IDENTIFICADOR);
-    while (lookahead.atomo == ATOMO_VIRGULA) {
-        consome(ATOMO_VIRGULA);
+void lista_variaveis(TCategoria categoria, int por_referencia) {
+    while (1) {
+        TInfoAtomo info = lookahead;
         consome(ATOMO_IDENTIFICADOR);
+        if (categoria == CAT_PARAMETRO && endereco_atual >= MAX_PARAMETROS) {
+            erro_semantico(info.linha, info.atributo.id, "excede o numero maximo de parametros");
+        }
+        TNo *no = insere(info.atributo.id, categoria, endereco_atual++, info.linha);
+        no->por_referencia = por_referencia;
+        if (lookahead.atomo != ATOMO_VIRGULA) break;
+        consome(ATOMO_VIRGULA);
     }
     consome(ATOMO_DOIS_PONTOS);
     tipo();
@@ -630,23 +643,34 @@ void declaracao_de_rotinas(void) {
 void declaracao_de_funcao(void) {
     consome(ATOMO_FUNCAO);
     tipo();
+    TInfoAtomo info = lookahead;
     consome(ATOMO_IDENTIFICADOR);
-    parametros_formais();
+    rotina_atual = insere(info.atributo.id, CAT_FUNCAO, 0, info.linha);
+    escopo_atual = 1;
+    parametros_formais(rotina_atual);
     declaracao_variaveis();
     comando_composto();
+    fecha_escopo();
+    rotina_atual = NULL;
 }
 
 // <declaracao_de_procedimento> ::= procedimento identificador <parametros_formais> <declaracao_variaveis> <comando_composto>
 void declaracao_de_procedimento(void) {
     consome(ATOMO_PROCEDIMENTO);
+    TInfoAtomo info = lookahead;
     consome(ATOMO_IDENTIFICADOR);
-    parametros_formais();
+    rotina_atual = insere(info.atributo.id, CAT_PROCEDIMENTO, 0, info.linha);
+    escopo_atual = 1;
+    parametros_formais(rotina_atual);
     declaracao_variaveis();
     comando_composto();
+    fecha_escopo();
+    rotina_atual = NULL;
 }
 
 // <parâmetros_formais> ::= '(' [ <parâmetro_formal> { ';' <parâmetro_formal> } ] ')'
-void parametros_formais(void) {
+void parametros_formais(TNo *rotina) {
+    endereco_atual = 0;
     consome(ATOMO_ABRE_PAR);
     if (lookahead.atomo == ATOMO_VAR || lookahead.atomo == ATOMO_IDENTIFICADOR) {
         parametro_formal();
@@ -656,14 +680,30 @@ void parametros_formais(void) {
         }
     }
     consome(ATOMO_FECHA_PAR);
+
+    int n = endereco_atual;
+    rotina->num_parametros = n;
+    if (rotina->categoria == CAT_FUNCAO) {
+        rotina->endereço = -(n + 3);
+    }
+    for (int i = 0; i < PRIME_NUMER; i++) {
+        for (TNo *no = tabela.entradas[i]; no != NULL; no = no->prox) {
+            if (no->ativo && no->escopo == 1 && no->categoria == CAT_PARAMETRO) {
+                rotina->parametros_ref[no->endereço] = no->por_referencia;
+                no->endereço = -(n + 3 - (no->endereço + 1));
+            }
+        }
+    }
 }
 
 // <parâmetro_formal> ::= [var] <lista_variaveis>
 void parametro_formal(void) {
+    int por_referencia = 0;
     if (lookahead.atomo == ATOMO_VAR) {
         consome(ATOMO_VAR);
+        por_referencia = 1;
     }
-    lista_variaveis();
+    lista_variaveis(CAT_PARAMETRO, por_referencia);
 }
 
 // <comando_composto> ::= inicio <comando> { ';' <comando> } fim
@@ -680,19 +720,31 @@ void comando_composto(void) {
 // <comando> ::= <comando_atribuição_ou_chamada> | <comando_entrada> | <comando_saida> | <comando_condicional> | <comando_repeticao> | <comando_composto>
 void comando(void) {
     if (lookahead.atomo == ATOMO_IDENTIFICADOR) {
+        TInfoAtomo info = lookahead;
         consome(ATOMO_IDENTIFICADOR);
+        TNo *no = verifica_declarado(info);
         if (lookahead.atomo == ATOMO_ATRIBUICAO) {
             // <comando_atribuição>
+            if (no->categoria != CAT_VARIAVEL && no->categoria != CAT_PARAMETRO &&
+                !(no->categoria == CAT_FUNCAO && no == rotina_atual)) {
+                erro_semantico(info.linha, info.atributo.id, "nao pode receber atribuicao");
+            }
             consome(ATOMO_ATRIBUICAO);
             expressao();
-        } else if (lookahead.atomo == ATOMO_ABRE_PAR) {
-            // <chamada_procedimento> com parâmetros
-            consome(ATOMO_ABRE_PAR);
-            lista_expressao();
-            consome(ATOMO_FECHA_PAR);
         } else {
-            // <chamada_procedimento> sem parâmetros
-            // Nada mais a consumir
+            // <chamada_procedimento> com ou sem parâmetros
+            if (no->categoria != CAT_PROCEDIMENTO) {
+                erro_semantico(info.linha, info.atributo.id, "nao e um procedimento");
+            }
+            int qtd = 0;
+            if (lookahead.atomo == ATOMO_ABRE_PAR) {
+                consome(ATOMO_ABRE_PAR);
+                qtd = lista_expressao(no);
+                consome(ATOMO_FECHA_PAR);
+            }
+            if (qtd != no->num_parametros) {
+                erro_semantico(info.linha, info.atributo.id, "chamado com numero de argumentos incorreto");
+            }
         }
     } else if (lookahead.atomo == ATOMO_LEIA) {
         comando_entrada();
@@ -713,10 +765,15 @@ void comando(void) {
 void comando_entrada(void) {
     consome(ATOMO_LEIA);
     consome(ATOMO_ABRE_PAR);
-    consome(ATOMO_IDENTIFICADOR);
-    while (lookahead.atomo == ATOMO_VIRGULA) {
-        consome(ATOMO_VIRGULA);
+    while (1) {
+        TInfoAtomo info = lookahead;
         consome(ATOMO_IDENTIFICADOR);
+        TNo *no = verifica_declarado(info);
+        if (no->categoria != CAT_VARIAVEL && no->categoria != CAT_PARAMETRO) {
+            erro_semantico(info.linha, info.atributo.id, "deve ser variavel ou parametro");
+        }
+        if (lookahead.atomo != ATOMO_VIRGULA) break;
+        consome(ATOMO_VIRGULA);
     }
     consome(ATOMO_FECHA_PAR);
 }
@@ -725,7 +782,7 @@ void comando_entrada(void) {
 void comando_saida(void) {
     consome(ATOMO_ESCREVA);
     consome(ATOMO_ABRE_PAR);
-    lista_expressao();
+    lista_expressao(NULL);
     consome(ATOMO_FECHA_PAR);
 }
 
@@ -750,10 +807,31 @@ void comando_repeticao(void) {
 }
 
 // <lista_expressão> ::= <expressão> { ',' <expressão> }
-void lista_expressao(void) {
-    expressao();
+int lista_expressao(TNo *rotina) {
+    int qtd = 0;
+    argumento(rotina, qtd++);
     while (lookahead.atomo == ATOMO_VIRGULA) {
         consome(ATOMO_VIRGULA);
+        argumento(rotina, qtd++);
+    }
+    return qtd;
+}
+
+void argumento(TNo *rotina, int indice) {
+    if (rotina != NULL && indice < rotina->num_parametros && rotina->parametros_ref[indice]) {
+        if (lookahead.atomo != ATOMO_IDENTIFICADOR) {
+            erro_semantico(lookahead.linha, rotina->ID, "parametro por referencia exige variavel como argumento");
+        }
+        TInfoAtomo info = lookahead;
+        consome(ATOMO_IDENTIFICADOR);
+        TNo *no = verifica_declarado(info);
+        if (no->categoria != CAT_VARIAVEL && no->categoria != CAT_PARAMETRO) {
+            erro_semantico(info.linha, info.atributo.id, "deve ser variavel ou parametro");
+        }
+        if (lookahead.atomo != ATOMO_VIRGULA && lookahead.atomo != ATOMO_FECHA_PAR) {
+            erro_semantico(info.linha, rotina->ID, "parametro por referencia exige variavel como argumento");
+        }
+    } else {
         expressao();
     }
 }
@@ -820,11 +898,25 @@ void operador_multiplicacao(void) {
 // <fator> ::= identificador [ '(' <lista_expressão> ')' ] | constint | constchar | '(' <expressão> ')' | ( '+' | '-' | nao ) <fator> | verdadeiro | falso
 void fator(void) {
     if (lookahead.atomo == ATOMO_IDENTIFICADOR) {
+        TInfoAtomo info = lookahead;
         consome(ATOMO_IDENTIFICADOR);
-        if (lookahead.atomo == ATOMO_ABRE_PAR) {
-            consome(ATOMO_ABRE_PAR);
-            lista_expressao();
-            consome(ATOMO_FECHA_PAR);
+        TNo *no = verifica_declarado(info);
+        if (no->categoria == CAT_PROCEDIMENTO) {
+            erro_semantico(info.linha, info.atributo.id, "procedimento nao pode ser usado em expressao");
+        }
+        if (lookahead.atomo == ATOMO_ABRE_PAR && no->categoria != CAT_FUNCAO) {
+            erro_semantico(info.linha, info.atributo.id, "nao e uma funcao");
+        }
+        if (no->categoria == CAT_FUNCAO) {
+            int qtd = 0;
+            if (lookahead.atomo == ATOMO_ABRE_PAR) {
+                consome(ATOMO_ABRE_PAR);
+                qtd = lista_expressao(no);
+                consome(ATOMO_FECHA_PAR);
+            }
+            if (qtd != no->num_parametros) {
+                erro_semantico(info.linha, info.atributo.id, "chamado com numero de argumentos incorreto");
+            }
         }
     } else if (lookahead.atomo == ATOMO_CONSTINT) {
         consome(ATOMO_CONSTINT);
