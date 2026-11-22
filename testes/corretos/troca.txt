@@ -1,0 +1,14 @@
+algoritmo proc_troca;
+var a, b: inteiro;
+procedimento troca(var x, y: inteiro)
+var tmp: inteiro;
+inicio
+  tmp := x;
+  x := y;
+  y := tmp
+fim
+inicio
+  leia(a, b);
+  troca(a, b);
+  escreva(a, b)
+fim.

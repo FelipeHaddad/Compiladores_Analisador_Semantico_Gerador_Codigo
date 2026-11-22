@@ -1,0 +1,8 @@
+algoritmo t;
+funcao inteiro f()
+inicio
+  f := 1
+fim
+inicio
+  f
+fim.

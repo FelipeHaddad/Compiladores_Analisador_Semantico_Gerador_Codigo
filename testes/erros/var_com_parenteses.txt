@@ -1,0 +1,5 @@
+algoritmo t;
+var x, y: inteiro;
+inicio
+  x := y(1)
+fim.

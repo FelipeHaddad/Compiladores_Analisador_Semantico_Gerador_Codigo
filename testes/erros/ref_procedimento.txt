@@ -1,0 +1,13 @@
+algoritmo t;
+var a: inteiro;
+procedimento q()
+inicio
+  a := 1
+fim
+procedimento r(var x: inteiro)
+inicio
+  x := 1
+fim
+inicio
+  r(q)
+fim.

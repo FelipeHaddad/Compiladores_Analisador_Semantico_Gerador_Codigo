@@ -1,0 +1,5 @@
+algoritmo t;
+var identificadorlongo: inteiro;
+inicio
+  identificadorlongo := 1
+fim.

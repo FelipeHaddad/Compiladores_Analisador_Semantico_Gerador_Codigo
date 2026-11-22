@@ -1,0 +1,9 @@
+algoritmo ops;
+var a, b: inteiro;
+inicio
+  a := 17;
+  b := 5;
+  escreva(a mod b, -3 + 10, 'A', nao falso, nao verdadeiro);
+  escreva((1 < 2) e (3 > 2), (1 > 2) ou falso, a div b, +a - -b);
+  escreva(a = 17, a <> 17, a <= 17, a >= 18, 20 mod 7 * 2)
+fim.

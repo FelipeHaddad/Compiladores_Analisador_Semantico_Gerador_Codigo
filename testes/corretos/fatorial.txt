@@ -1,0 +1,13 @@
+algoritmo exemplo2;
+var fat, num, cont: inteiro;
+inicio
+  leia(num);
+  fat := 1;
+  cont := 2;
+  enquanto cont <= num faca
+  inicio
+    fat := fat * cont;
+    cont := cont + 1
+  fim;
+  escreva(fat)
+fim.

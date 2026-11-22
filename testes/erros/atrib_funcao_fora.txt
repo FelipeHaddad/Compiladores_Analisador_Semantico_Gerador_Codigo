@@ -1,0 +1,9 @@
+algoritmo t;
+var a: inteiro;
+funcao inteiro f()
+inicio
+  f := 1
+fim
+inicio
+  f := 2
+fim.

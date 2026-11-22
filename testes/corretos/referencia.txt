@@ -1,0 +1,27 @@
+algoritmo procedimento4;
+var n: inteiro;
+procedimento p(f: inteiro; var r: inteiro)
+inicio
+  se f = 1 entao
+    r := f
+  senao
+    p(f - 1, r)
+fim
+procedimento inc(var x: inteiro)
+inicio
+  x := x + 1
+fim
+procedimento inc2(var y: inteiro)
+inicio
+  inc(y);
+  inc(y);
+  escreva(y);
+  leia(y)
+fim
+inicio
+  p(2, n);
+  escreva(n);
+  n := 5;
+  inc2(n);
+  escreva(n)
+fim.

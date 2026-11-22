@@ -1,0 +1,31 @@
+{- conta os primos ate n -}
+algoritmo primos;
+funcao inteiro conta(n: inteiro)
+var i, d, total, primo: inteiro;
+inicio
+  total := 0;
+  i := 2;
+  enquanto i <= n faca
+  inicio
+    primo := 1;
+    d := 2;
+    enquanto (d * d <= i) e (primo = 1) faca
+    inicio
+      se i mod d = 0 entao
+        primo := 0
+      senao
+        d := d + 1
+    fim;
+    se primo = 1 entao
+      total := total + 1;
+    i := i + 1
+  fim;
+  conta := total
+fim
+funcao inteiro um()
+inicio
+  um := 1
+fim
+inicio
+  escreva(conta(20), um + um, conta(100))
+fim.

@@ -1,0 +1,9 @@
+algoritmo t;
+var a, b: inteiro;
+procedimento troca(var x, y: inteiro)
+inicio
+  x := y
+fim
+inicio
+  troca(a + 1, b)
+fim.

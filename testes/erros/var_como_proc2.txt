@@ -1,0 +1,5 @@
+algoritmo t;
+var x: inteiro;
+inicio
+  x
+fim.

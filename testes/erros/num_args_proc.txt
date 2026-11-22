@@ -1,0 +1,9 @@
+algoritmo t;
+var a: inteiro;
+procedimento p(x, y: inteiro)
+inicio
+  a := x
+fim
+inicio
+  p(a)
+fim.

@@ -1,0 +1,8 @@
+algoritmo t;
+procedimento p(a: inteiro; var a: inteiro)
+inicio
+  a := 1
+fim
+inicio
+  p(1, 2)
+fim.

@@ -1,0 +1,8 @@
+algoritmo t;
+procedimento p()
+inicio
+  p := 1
+fim
+inicio
+  p
+fim.
