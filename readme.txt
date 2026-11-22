@@ -16,7 +16,7 @@ e, em seguida, a Tabela de Símbolos. O mesmo código MEPA também é gravado no
 arquivo <arquivo de entrada sem extensão>.mepa (ex.: teste.txt -> teste.mepa),
 que pode ser executado diretamente na máquina virtual da MEPA:
 
-  ./mepa teste.mepa
+  ./mepa -f teste.mepa
 
 Se o programa fonte tiver erro, é impresso somente o primeiro erro encontrado,
 com a linha e o tipo (lexico, sintatico ou semantico), e nenhum .mepa é gerado.
