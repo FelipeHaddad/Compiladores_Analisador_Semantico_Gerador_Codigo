@@ -6,6 +6,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <math.h>
+#include <stdarg.h>
 
 
    // DEFINIÇÃO DOS ÁTOMOS DA LINGUAGEM
@@ -119,6 +120,12 @@ TTabelaSimbolos tabela;
 int escopo_atual = 0;
 int endereco_atual = 0;
 TNo *rotina_atual = NULL;
+char *codigo = NULL;
+int tam_codigo = 0;
+int capacidade_codigo = 0;
+int rotulo_atual = 0;
+int num_globais = 0;
+int usa_mod = 0;
 
 //  PROTÓTIPOS DAS FUNÇÕES
 
@@ -136,6 +143,13 @@ TNo* verifica_declarado(TInfoAtomo info);
 void fecha_escopo(void);
 void imprime_tabela(void);
 void libera_tabela(void);
+
+// Funções da Geração de Código MEPA
+void gera(const char *formato, ...);
+int proximo_rotulo(void);
+void gera_armazena(TNo *no);
+void imprime_codigo(void);
+void libera_codigo(void);
 
 // Funções do ASDR para a Gramática EBNF de Portugol
 void programa(void);
@@ -231,6 +245,7 @@ void erro_lexico(const char *msg) {
     printf("# %2d:erro lexico, %s\n", linha_atual, msg);
     if (arquivo_fonte) fclose(arquivo_fonte);
     libera_tabela();
+    libera_codigo();
     exit(1);
 }
 
@@ -241,6 +256,7 @@ void erro_sintatico(TAtomo atomo_esperado, TInfoAtomo atomo_encontrado) {
            nome_atomo(atomo_encontrado.atomo));
     if (arquivo_fonte) fclose(arquivo_fonte);
     libera_tabela();
+    libera_codigo();
     exit(1);
 }
 
@@ -248,6 +264,7 @@ void erro_semantico(int linha, const char *id, const char *msg) {
     printf("# %2d:erro semantico, identificador [%s] %s\n", linha, id, msg);
     if (arquivo_fonte) fclose(arquivo_fonte);
     libera_tabela();
+    libera_codigo();
     exit(1);
 }
 
@@ -323,6 +340,48 @@ void libera_tabela(void) {
         }
         tabela.entradas[i] = NULL;
     }
+}
+
+//   GERAÇÃO DE CÓDIGO MEPA
+
+void gera(const char *formato, ...) {
+    char linha[64];
+    va_list args;
+    va_start(args, formato);
+    int tam = vsnprintf(linha, sizeof(linha), formato, args);
+    va_end(args);
+    if (tam_codigo + tam + 1 > capacidade_codigo) {
+        capacidade_codigo = (tam_codigo + tam + 1) * 2;
+        codigo = (char*)realloc(codigo, capacidade_codigo);
+    }
+    strcpy(codigo + tam_codigo, linha);
+    tam_codigo += tam;
+}
+
+int proximo_rotulo(void) {
+    return ++rotulo_atual;
+}
+
+void gera_armazena(TNo *no) {
+    if (no->categoria == CAT_FUNCAO) {
+        gera("   ARMZ 1,%d\n", no->endereço);
+    } else if (no->por_referencia) {
+        gera("   ARMI %d,%d\n", no->escopo, no->endereço);
+    } else {
+        gera("   ARMZ %d,%d\n", no->escopo, no->endereço);
+    }
+}
+
+void imprime_codigo(void) {
+    int total = num_globais + (usa_mod ? 2 : 0);
+    printf("   INPP\n");
+    if (total > 0) printf("   AMEM %d\n", total);
+    printf("%s", codigo);
+}
+
+void libera_codigo(void) {
+    free(codigo);
+    codigo = NULL;
 }
 
 //   ANALISADOR LÉXICO (obter_atomo)
@@ -580,8 +639,22 @@ void programa(void) {
 // <bloco> ::= <declaração_variáveis> <declaração_de_rotinas> <comando_composto>
 void bloco(void) {
     declaracao_variaveis();
+    num_globais = endereco_atual;
+    int rotulo_principal = 0;
+    if (lookahead.atomo == ATOMO_FUNCAO || lookahead.atomo == ATOMO_PROCEDIMENTO) {
+        rotulo_principal = proximo_rotulo();
+        gera("   DSVS L%d\n", rotulo_principal);
+    }
     declaracao_de_rotinas();
+    if (rotulo_principal > 0) {
+        gera("L%d:NADA\n", rotulo_principal);
+    }
     comando_composto();
+    int total = num_globais + (usa_mod ? 2 : 0);
+    if (total > 0) {
+        gera("   DMEM %d\n", total);
+    }
+    gera("   PARA\n");
 }
 
 // <declaração_variáveis> ::= [ var <lista_variaveis> ';' { <lista_variaveis> ';' } ]
@@ -646,10 +719,21 @@ void declaracao_de_funcao(void) {
     TInfoAtomo info = lookahead;
     consome(ATOMO_IDENTIFICADOR);
     rotina_atual = insere(info.atributo.id, CAT_FUNCAO, 0, info.linha);
+    rotina_atual->rotulo = proximo_rotulo();
+    gera("L%d:NADA\n", rotina_atual->rotulo);
+    gera("   ENPR\n");
     escopo_atual = 1;
     parametros_formais(rotina_atual);
     declaracao_variaveis();
+    int num_locais = endereco_atual;
+    if (num_locais > 0) {
+        gera("   AMEM %d\n", num_locais);
+    }
     comando_composto();
+    if (num_locais > 0) {
+        gera("   DMEM %d\n", num_locais);
+    }
+    gera("   RTPR %d\n", rotina_atual->num_parametros);
     fecha_escopo();
     rotina_atual = NULL;
 }
@@ -660,10 +744,21 @@ void declaracao_de_procedimento(void) {
     TInfoAtomo info = lookahead;
     consome(ATOMO_IDENTIFICADOR);
     rotina_atual = insere(info.atributo.id, CAT_PROCEDIMENTO, 0, info.linha);
+    rotina_atual->rotulo = proximo_rotulo();
+    gera("L%d:NADA\n", rotina_atual->rotulo);
+    gera("   ENPR\n");
     escopo_atual = 1;
     parametros_formais(rotina_atual);
     declaracao_variaveis();
+    int num_locais = endereco_atual;
+    if (num_locais > 0) {
+        gera("   AMEM %d\n", num_locais);
+    }
     comando_composto();
+    if (num_locais > 0) {
+        gera("   DMEM %d\n", num_locais);
+    }
+    gera("   RTPR %d\n", rotina_atual->num_parametros);
     fecha_escopo();
     rotina_atual = NULL;
 }
@@ -731,6 +826,7 @@ void comando(void) {
             }
             consome(ATOMO_ATRIBUICAO);
             expressao();
+            gera_armazena(no);
         } else {
             // <chamada_procedimento> com ou sem parâmetros
             if (no->categoria != CAT_PROCEDIMENTO) {
@@ -745,6 +841,7 @@ void comando(void) {
             if (qtd != no->num_parametros) {
                 erro_semantico(info.linha, info.atributo.id, "chamado com numero de argumentos incorreto");
             }
+            gera("   CHPR L%d\n", no->rotulo);
         }
     } else if (lookahead.atomo == ATOMO_LEIA) {
         comando_entrada();
@@ -772,6 +869,8 @@ void comando_entrada(void) {
         if (no->categoria != CAT_VARIAVEL && no->categoria != CAT_PARAMETRO) {
             erro_semantico(info.linha, info.atributo.id, "deve ser variavel ou parametro");
         }
+        gera("   LEIT\n");
+        gera_armazena(no);
         if (lookahead.atomo != ATOMO_VIRGULA) break;
         consome(ATOMO_VIRGULA);
     }
@@ -782,7 +881,13 @@ void comando_entrada(void) {
 void comando_saida(void) {
     consome(ATOMO_ESCREVA);
     consome(ATOMO_ABRE_PAR);
-    lista_expressao(NULL);
+    expressao();
+    gera("   IMPR\n");
+    while (lookahead.atomo == ATOMO_VIRGULA) {
+        consome(ATOMO_VIRGULA);
+        expressao();
+        gera("   IMPR\n");
+    }
     consome(ATOMO_FECHA_PAR);
 }
 
@@ -790,20 +895,34 @@ void comando_saida(void) {
 void comando_condicional(void) {
     consome(ATOMO_SE);
     expressao();
+    int rotulo_senao = proximo_rotulo();
+    gera("   DSVF L%d\n", rotulo_senao);
     consome(ATOMO_ENTAO);
     comando();
     if (lookahead.atomo == ATOMO_SENAO) {
+        int rotulo_fim = proximo_rotulo();
+        gera("   DSVS L%d\n", rotulo_fim);
+        gera("L%d:NADA\n", rotulo_senao);
         consome(ATOMO_SENAO);
         comando();
+        gera("L%d:NADA\n", rotulo_fim);
+    } else {
+        gera("L%d:NADA\n", rotulo_senao);
     }
 }
 
 // <comando_repeticao> ::= enquanto <expressão> faca <comando>
 void comando_repeticao(void) {
+    int rotulo_inicio = proximo_rotulo();
+    int rotulo_fim = proximo_rotulo();
+    gera("L%d:NADA\n", rotulo_inicio);
     consome(ATOMO_ENQUANTO);
     expressao();
+    gera("   DSVF L%d\n", rotulo_fim);
     consome(ATOMO_FACA);
     comando();
+    gera("   DSVS L%d\n", rotulo_inicio);
+    gera("L%d:NADA\n", rotulo_fim);
 }
 
 // <lista_expressão> ::= <expressão> { ',' <expressão> }
@@ -818,7 +937,7 @@ int lista_expressao(TNo *rotina) {
 }
 
 void argumento(TNo *rotina, int indice) {
-    if (rotina != NULL && indice < rotina->num_parametros && rotina->parametros_ref[indice]) {
+    if (indice < rotina->num_parametros && rotina->parametros_ref[indice]) {
         if (lookahead.atomo != ATOMO_IDENTIFICADOR) {
             erro_semantico(lookahead.linha, rotina->ID, "parametro por referencia exige variavel como argumento");
         }
@@ -831,6 +950,11 @@ void argumento(TNo *rotina, int indice) {
         if (lookahead.atomo != ATOMO_VIRGULA && lookahead.atomo != ATOMO_FECHA_PAR) {
             erro_semantico(info.linha, rotina->ID, "parametro por referencia exige variavel como argumento");
         }
+        if (no->por_referencia) {
+            gera("   CRVL %d,%d\n", no->escopo, no->endereço);
+        } else {
+            gera("   CREN %d,%d\n", no->escopo, no->endereço);
+        }
     } else {
         expressao();
     }
@@ -842,8 +966,15 @@ void expressao(void) {
     if (lookahead.atomo == ATOMO_OP_DIFERENTE || lookahead.atomo == ATOMO_OP_MENOR_IGUAL ||
         lookahead.atomo == ATOMO_OP_MAIOR_IGUAL || lookahead.atomo == ATOMO_OP_MENOR ||
         lookahead.atomo == ATOMO_OP_MAIOR || lookahead.atomo == ATOMO_OP_IGUAL) {
+        TAtomo op = lookahead.atomo;
         operador_relacional();
         expressao_simples();
+        if (op == ATOMO_OP_IGUAL) gera("   CMIG\n");
+        else if (op == ATOMO_OP_DIFERENTE) gera("   CMDG\n");
+        else if (op == ATOMO_OP_MENOR) gera("   CMME\n");
+        else if (op == ATOMO_OP_MENOR_IGUAL) gera("   CMEG\n");
+        else if (op == ATOMO_OP_MAIOR) gera("   CMMA\n");
+        else gera("   CMAG\n");
     }
 }
 
@@ -862,8 +993,24 @@ void expressao_simples(void) {
     termo();
     while (lookahead.atomo == ATOMO_OP_SOMA || lookahead.atomo == ATOMO_OP_SUB ||
            lookahead.atomo == ATOMO_MOD || lookahead.atomo == ATOMO_OU) {
+        TAtomo op = lookahead.atomo;
         operador_adicao();
         termo();
+        if (op == ATOMO_OP_SOMA) gera("   SOMA\n");
+        else if (op == ATOMO_OP_SUB) gera("   SUBT\n");
+        else if (op == ATOMO_OU) gera("   DISJ\n");
+        else {
+            usa_mod = 1;
+            gera("   ARMZ 0,%d\n", num_globais + 1);
+            gera("   ARMZ 0,%d\n", num_globais);
+            gera("   CRVL 0,%d\n", num_globais);
+            gera("   CRVL 0,%d\n", num_globais);
+            gera("   CRVL 0,%d\n", num_globais + 1);
+            gera("   DIVI\n");
+            gera("   CRVL 0,%d\n", num_globais + 1);
+            gera("   MULT\n");
+            gera("   SUBT\n");
+        }
     }
 }
 
@@ -881,8 +1028,12 @@ void termo(void) {
     fator();
     while (lookahead.atomo == ATOMO_OP_MULT || lookahead.atomo == ATOMO_DIV ||
            lookahead.atomo == ATOMO_E) {
+        TAtomo op = lookahead.atomo;
         operador_multiplicacao();
         fator();
+        if (op == ATOMO_OP_MULT) gera("   MULT\n");
+        else if (op == ATOMO_DIV) gera("   DIVI\n");
+        else gera("   CONJ\n");
     }
 }
 
@@ -908,6 +1059,7 @@ void fator(void) {
             erro_semantico(info.linha, info.atributo.id, "nao e uma funcao");
         }
         if (no->categoria == CAT_FUNCAO) {
+            gera("   AMEM 1\n");
             int qtd = 0;
             if (lookahead.atomo == ATOMO_ABRE_PAR) {
                 consome(ATOMO_ABRE_PAR);
@@ -917,21 +1069,33 @@ void fator(void) {
             if (qtd != no->num_parametros) {
                 erro_semantico(info.linha, info.atributo.id, "chamado com numero de argumentos incorreto");
             }
+            gera("   CHPR L%d\n", no->rotulo);
+        } else if (no->por_referencia) {
+            gera("   CRVI %d,%d\n", no->escopo, no->endereço);
+        } else {
+            gera("   CRVL %d,%d\n", no->escopo, no->endereço);
         }
     } else if (lookahead.atomo == ATOMO_CONSTINT) {
+        gera("   CRCT %d\n", lookahead.atributo.numero);
         consome(ATOMO_CONSTINT);
     } else if (lookahead.atomo == ATOMO_CONSTCHAR) {
+        gera("   CRCT %d\n", (unsigned char)lookahead.atributo.ch);
         consome(ATOMO_CONSTCHAR);
     } else if (lookahead.atomo == ATOMO_ABRE_PAR) {
         consome(ATOMO_ABRE_PAR);
         expressao();
         consome(ATOMO_FECHA_PAR);
     } else if (lookahead.atomo == ATOMO_OP_SOMA || lookahead.atomo == ATOMO_OP_SUB || lookahead.atomo == ATOMO_NAO) {
+        TAtomo op = lookahead.atomo;
         consome(lookahead.atomo);
         fator();
+        if (op == ATOMO_OP_SUB) gera("   INVR\n");
+        else if (op == ATOMO_NAO) gera("   NEGA\n");
     } else if (lookahead.atomo == ATOMO_VERDADEIRO) {
+        gera("   CRCT 1\n");
         consome(ATOMO_VERDADEIRO);
     } else if (lookahead.atomo == ATOMO_FALSO) {
+        gera("   CRCT 0\n");
         consome(ATOMO_FALSO);
     } else {
         erro_sintatico(ATOMO_IDENTIFICADOR, lookahead);
@@ -963,8 +1127,10 @@ int main(int argc, char *argv[]) {
 
     if (arquivo_fonte) fclose(arquivo_fonte);
 
+    imprime_codigo();
     imprime_tabela();
     libera_tabela();
+    libera_codigo();
 
     return 0;
 }
