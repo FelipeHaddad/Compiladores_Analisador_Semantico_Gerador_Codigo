@@ -79,20 +79,62 @@ typedef struct {
         char ch;        // atributo para constchar
     } atributo;
 } TInfoAtomo;
- 
+
+//   TABELA DE SÍMBOLOS (Hash)
+
+#define PRIME_NUMER 211 // numero primo para reduzir colisoes
+#define MAX_PARAMETROS 32
+
+typedef enum {
+    CAT_VARIAVEL,
+    CAT_PARAMETRO,
+    CAT_FUNCAO,
+    CAT_PROCEDIMENTO
+} TCategoria;
+
+typedef struct _TNo{
+   char ID[16];
+   int endereço;
+   // aqui você deve declarar os outros campos que julgar necessário para
+   // armazenar os identificadores
+   TCategoria categoria;
+   int escopo;                          // 0 global, 1 local
+   int ativo;                           // 0 depois que o escopo local da rotina foi fechado
+   int por_referencia;                  // parametro declarado com var
+   int rotulo;                          // rotulo Lk da funcao/procedimento
+   int num_parametros;
+   int parametros_ref[MAX_PARAMETROS];  // modo de cada parametro (1 = var)
+
+   struct _TNo *prox;
+}TNo;
+
+typedef struct {
+    TNo *entradas[PRIME_NUMER];
+}TTabelaSimbolos;
+
 //   VARIÁVEIS GLOBAIS
-    
+
 FILE *arquivo_fonte = NULL;
 int linha_atual = 1;
 TInfoAtomo lookahead;
-int total_linhas_analisadas = 0;
- 
+TTabelaSimbolos tabela;
+int escopo_atual = 0;
+
 //  PROTÓTIPOS DAS FUNÇÕES
-    
+
 TInfoAtomo obter_atomo(void);
 void consome(TAtomo atomo_esperado);
 const char* nome_atomo(TAtomo atomo);
-void imprime_info_atomo(TInfoAtomo info);
+
+// Função de hash implementada em hash_mack.o
+int hashMack(char *s);
+
+// Funções da Tabela de Símbolos
+TNo* insere(char *id, TCategoria categoria, int endereco, int linha);
+TNo* busca(char *id);
+void fecha_escopo(void);
+void imprime_tabela(void);
+void libera_tabela(void);
 
 // Funções do ASDR para a Gramática EBNF de Portugol
 void programa(void);
@@ -173,37 +215,20 @@ const char* nome_atomo(TAtomo atomo) {
     }
 }
 
-void imprime_info_atomo(TInfoAtomo info) {
-    if (info.atomo == ATOMO_COMENTARIO) {
-        printf("# %2d:comentario\n", info.linha);
-    } else if (info.atomo == ATOMO_IDENTIFICADOR) {
-        printf("# %2d:identificador: %s\n", info.linha, info.atributo.id);
-    } else if (info.atomo == ATOMO_CONSTINT) {
-        printf("# %2d:constint: %d\n", info.linha, info.atributo.numero);
-    } else if (info.atomo == ATOMO_CONSTCHAR) {
-        printf("# %2d:constchar: %c\n", info.linha, info.atributo.ch);
-    } else if (info.atomo == ATOMO_PONTO_VIRGULA) {
-        printf("# %2d:ponto_virgula\n", info.linha);
-    } else if (info.atomo == ATOMO_PONTO) {
-        printf("# %2d:ponto\n", info.linha);
-    } else if (info.atomo == ATOMO_VIRGULA) {
-        printf("# %2d:virgula\n", info.linha);
-    } else if (info.atomo == ATOMO_DOIS_PONTOS) {
-        printf("# %2d:dois_pontos\n", info.linha);
-    } else if (info.atomo == ATOMO_ATRIBUICAO) {
-        printf("# %2d:atribuicao\n", info.linha);
-    } else if (info.atomo == ATOMO_ABRE_PAR) {
-        printf("# %2d:abre_par\n", info.linha);
-    } else if (info.atomo == ATOMO_FECHA_PAR) {
-        printf("# %2d:fecha_par\n", info.linha);
-    } else {
-        printf("# %2d:%s\n", info.linha, nome_atomo(info.atomo));
+const char* nome_categoria(TCategoria categoria) {
+    switch (categoria) {
+        case CAT_VARIAVEL: return "variavel";
+        case CAT_PARAMETRO: return "parametro";
+        case CAT_FUNCAO: return "funcao";
+        case CAT_PROCEDIMENTO: return "procedimento";
+        default: return "desconhecido";
     }
 }
 
 void erro_lexico(const char *msg) {
     printf("# %2d:erro lexico, %s\n", linha_atual, msg);
     if (arquivo_fonte) fclose(arquivo_fonte);
+    libera_tabela();
     exit(1);
 }
 
@@ -213,9 +238,86 @@ void erro_sintatico(TAtomo atomo_esperado, TInfoAtomo atomo_encontrado) {
            nome_atomo(atomo_esperado),
            nome_atomo(atomo_encontrado.atomo));
     if (arquivo_fonte) fclose(arquivo_fonte);
+    libera_tabela();
     exit(1);
 }
- 
+
+void erro_semantico(int linha, const char *id, const char *msg) {
+    printf("# %2d:erro semantico, identificador [%s] %s\n", linha, id, msg);
+    if (arquivo_fonte) fclose(arquivo_fonte);
+    libera_tabela();
+    exit(1);
+}
+
+//   TABELA DE SÍMBOLOS (insere, busca, fecha_escopo, imprime e libera)
+
+// Insere no início da lista da entrada hashMack(id); erro se o ID já existe no escopo atual
+TNo* insere(char *id, TCategoria categoria, int endereco, int linha) {
+    int entrada = hashMack(id);
+    for (TNo *no = tabela.entradas[entrada]; no != NULL; no = no->prox) {
+        if (no->ativo && no->escopo == escopo_atual && strcmp(no->ID, id) == 0) {
+            erro_semantico(linha, id, "ja declarado neste escopo");
+        }
+    }
+
+    TNo *novo = (TNo*)calloc(1, sizeof(TNo));
+    strncpy(novo->ID, id, 15);
+    novo->ID[15] = '\0';
+    novo->endereço = endereco;
+    novo->categoria = categoria;
+    novo->escopo = escopo_atual;
+    novo->ativo = 1;
+    novo->prox = tabela.entradas[entrada];
+    tabela.entradas[entrada] = novo;
+    return novo;
+}
+
+// Locais são inseridos depois dos globais, então ficam antes na lista e são achados primeiro
+TNo* busca(char *id) {
+    for (TNo *no = tabela.entradas[hashMack(id)]; no != NULL; no = no->prox) {
+        if (no->ativo && strcmp(no->ID, id) == 0) {
+            return no;
+        }
+    }
+    return NULL;
+}
+
+// Fim de rotina: locais e parâmetros ficam inativos, mas continuam na tabela para a impressão final
+void fecha_escopo(void) {
+    for (int i = 0; i < PRIME_NUMER; i++) {
+        for (TNo *no = tabela.entradas[i]; no != NULL; no = no->prox) {
+            if (no->escopo == 1) no->ativo = 0;
+        }
+    }
+    escopo_atual = 0;
+}
+
+void imprime_tabela(void) {
+    printf("\nTABELA DE SIMBOLOS\n");
+    for (int i = 0; i < PRIME_NUMER; i++) {
+        for (TNo *no = tabela.entradas[i]; no != NULL; no = no->prox) {
+            if (no->categoria == CAT_VARIAVEL || no->categoria == CAT_PARAMETRO) {
+                printf("entrada [%3d] id [%s] %s endereco [%d,%d]\n",
+                       i, no->ID, nome_categoria(no->categoria), no->escopo, no->endereço);
+            } else {
+                printf("entrada [%3d] id [%s] %s\n", i, no->ID, nome_categoria(no->categoria));
+            }
+        }
+    }
+}
+
+void libera_tabela(void) {
+    for (int i = 0; i < PRIME_NUMER; i++) {
+        TNo *no = tabela.entradas[i];
+        while (no != NULL) {
+            TNo *prox = no->prox;
+            free(no);
+            no = prox;
+        }
+        tabela.entradas[i] = NULL;
+    }
+}
+
 //   ANALISADOR LÉXICO (obter_atomo)
     
 TInfoAtomo obter_atomo(void) {
@@ -450,11 +552,9 @@ TInfoAtomo obter_atomo(void) {
     
 void consome(TAtomo atomo_esperado) {
     if (lookahead.atomo == atomo_esperado) {
-        imprime_info_atomo(lookahead);
         lookahead = obter_atomo();
-        // Repassa e imprime comentários continuamente
+        // Ignora comentários
         while (lookahead.atomo == ATOMO_COMENTARIO) {
-            imprime_info_atomo(lookahead);
             lookahead = obter_atomo();
         }
     } else {
@@ -763,19 +863,16 @@ int main(int argc, char *argv[]) {
     // Inicializa o lookahead com o primeiro átomo
     lookahead = obter_atomo();
     while (lookahead.atomo == ATOMO_COMENTARIO) {
-        imprime_info_atomo(lookahead);
         lookahead = obter_atomo();
     }
 
     // Executa a análise sintática
     programa();
 
-    // Salva o total de linhas antes de fechar
-    total_linhas_analisadas = linha_atual;
-
     if (arquivo_fonte) fclose(arquivo_fonte);
 
-    printf("%d linhas analisadas, programa sintaticamente correto\n", total_linhas_analisadas);
+    imprime_tabela();
+    libera_tabela();
 
     return 0;
 }
