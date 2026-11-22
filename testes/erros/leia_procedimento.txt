@@ -1,9 +1,0 @@
-algoritmo t;
-var a: inteiro;
-procedimento p()
-inicio
-  a := 1
-fim
-inicio
-  leia(a, p)
-fim.

@@ -1,9 +1,0 @@
-algoritmo t;
-var a, b: inteiro;
-procedimento troca(var x, y: inteiro)
-inicio
-  x := y
-fim
-inicio
-  troca(1, b)
-fim.

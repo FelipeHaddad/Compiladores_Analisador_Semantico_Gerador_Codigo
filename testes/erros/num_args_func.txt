@@ -1,9 +1,0 @@
-algoritmo t;
-var a: inteiro;
-funcao inteiro f(x: inteiro)
-inicio
-  f := x
-fim
-inicio
-  a := f
-fim.

@@ -1,5 +1,0 @@
-algoritmo t;
-var x: inteiro;
-inicio
-  x := y + 1
-fim.
