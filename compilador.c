@@ -83,9 +83,10 @@ typedef struct {
 
 //   TABELA DE SÍMBOLOS (Hash)
 
-#define PRIME_NUMER 211
+#define PRIME_NUMER 211 // numero primo para reduzir colisoes
 #define MAX_PARAMETROS 32
 
+// Categorias dos identificadores armazenados na Tabela de Símbolos
 typedef enum {
     CAT_VARIAVEL,
     CAT_PARAMETRO,
@@ -96,13 +97,13 @@ typedef enum {
 typedef struct _TNo{
    char ID[16];
    int endereço;
-   TCategoria categoria;
-   int escopo;                          
-   int ativo;                           
-   int por_referencia;                  
-   int rotulo;                          
-   int num_parametros;
-   int parametros_ref[MAX_PARAMETROS]; 
+   TCategoria categoria;                // variável, parâmetro, função ou procedimento
+   int escopo;                          // 0 = global, 1 = local
+   int ativo;                           // 0 depois que o escopo da rotina termina
+   int por_referencia;                  // parâmetro declarado com var
+   int rotulo;                          // rótulo Lk da função ou procedimento
+   int num_parametros;                  // número de parâmetros da rotina
+   int parametros_ref[MAX_PARAMETROS];  // indica quais parâmetros da rotina são var
 
    struct _TNo *prox;
 }TNo;
@@ -117,10 +118,14 @@ FILE *arquivo_fonte = NULL;
 int linha_atual = 1;
 int linha_anterior = 1;
 TInfoAtomo lookahead;
+
+// Tabela de Símbolos e controle de escopo e endereços
 TTabelaSimbolos tabela;
 int escopo_atual = 0;
 int endereco_atual = 0;
 TNo *rotina_atual = NULL;
+
+// Buffer onde o código MEPA é acumulado até o fim da compilação
 char *codigo = NULL;
 int tam_codigo = 0;
 int capacidade_codigo = 0;
@@ -272,6 +277,7 @@ void erro_semantico(int linha, const char *id, const char *msg) {
 
 //   TABELA DE SÍMBOLOS
 
+// Insere o identificador no início da lista da sua entrada (erro se já existe no mesmo escopo)
 TNo* insere(char *id, TCategoria categoria, int endereco, int linha) {
     int entrada = hashMack(id);
     for (TNo *no = tabela.entradas[entrada]; no != NULL; no = no->prox) {
@@ -292,6 +298,7 @@ TNo* insere(char *id, TCategoria categoria, int endereco, int linha) {
     return novo;
 }
 
+// Busca o identificador ativo; o local é encontrado antes do global por estar no início da lista
 TNo* busca(char *id) {
     for (TNo *no = tabela.entradas[hashMack(id)]; no != NULL; no = no->prox) {
         if (no->ativo && strcmp(no->ID, id) == 0) {
@@ -309,6 +316,7 @@ TNo* verifica_declarado(TInfoAtomo info) {
     return no;
 }
 
+// Fim de uma rotina: parâmetros e variáveis locais ficam inativos (continuam na tabela para a impressão)
 void fecha_escopo(void) {
     for (int i = 0; i < PRIME_NUMER; i++) {
         for (TNo *no = tabela.entradas[i]; no != NULL; no = no->prox) {
@@ -346,6 +354,7 @@ void libera_tabela(void) {
 
 //   GERAÇÃO DE CÓDIGO MEPA
 
+// Acrescenta uma instrução MEPA no buffer de código (mesmo formato do printf)
 void gera(const char *formato, ...) {
     char linha[64];
     va_list args;
@@ -364,6 +373,7 @@ int proximo_rotulo(void) {
     return ++rotulo_atual;
 }
 
+// Armazena o topo da pilha no identificador (retorno de função, parâmetro var ou variável)
 void gera_armazena(TNo *no) {
     if (no->categoria == CAT_FUNCAO) {
         gera("   ARMZ 1,%d\n", no->endereço);
@@ -374,6 +384,7 @@ void gera_armazena(TNo *no) {
     }
 }
 
+// INPP e AMEM são impressos no fim, quando já se sabe se o programa usa mod
 void imprime_codigo(FILE *saida) {
     int total = num_globais + (usa_mod ? 2 : 0);
     fprintf(saida, "   INPP\n");
@@ -381,6 +392,7 @@ void imprime_codigo(FILE *saida) {
     fprintf(saida, "%s", codigo);
 }
 
+// Grava o código MEPA no arquivo <nome do fonte sem extensão>.mepa
 void grava_codigo(const char *nome_fonte) {
     char nome[512];
     const char *ponto = strrchr(nome_fonte, '.');
@@ -661,6 +673,8 @@ void programa(void) {
 void bloco(void) {
     declaracao_variaveis();
     num_globais = endereco_atual;
+
+    // Se houver rotinas, desvia para o início do programa principal
     int rotulo_principal = 0;
     if (lookahead.atomo == ATOMO_FUNCAO || lookahead.atomo == ATOMO_PROCEDIMENTO) {
         rotulo_principal = proximo_rotulo();
@@ -671,6 +685,8 @@ void bloco(void) {
         gera("L%d:NADA\n", rotulo_principal);
     }
     comando_composto();
+
+    // Desaloca as variáveis globais (e as auxiliares do mod)
     int total = num_globais + (usa_mod ? 2 : 0);
     if (total > 0) {
         gera("   DMEM %d\n", total);
@@ -697,6 +713,8 @@ void lista_variaveis(TCategoria categoria, int por_referencia) {
     while (1) {
         TInfoAtomo info = lookahead;
         consome(ATOMO_IDENTIFICADOR);
+
+        // Cada identificador recebe o próximo endereço do escopo atual
         if (categoria == CAT_PARAMETRO && endereco_atual >= MAX_PARAMETROS) {
             erro_semantico(info.linha, info.atributo.id, "excede o numero maximo de parametros");
         }
@@ -739,6 +757,8 @@ void declaracao_de_funcao(void) {
     tipo();
     TInfoAtomo info = lookahead;
     consome(ATOMO_IDENTIFICADOR);
+
+    // Nome da função no escopo global; parâmetros e variáveis locais no escopo local
     rotina_atual = insere(info.atributo.id, CAT_FUNCAO, 0, info.linha);
     rotina_atual->rotulo = proximo_rotulo();
     gera("L%d:NADA\n", rotina_atual->rotulo);
@@ -764,6 +784,8 @@ void declaracao_de_procedimento(void) {
     consome(ATOMO_PROCEDIMENTO);
     TInfoAtomo info = lookahead;
     consome(ATOMO_IDENTIFICADOR);
+
+    // Nome do procedimento no escopo global; parâmetros e variáveis locais no escopo local
     rotina_atual = insere(info.atributo.id, CAT_PROCEDIMENTO, 0, info.linha);
     rotina_atual->rotulo = proximo_rotulo();
     gera("L%d:NADA\n", rotina_atual->rotulo);
@@ -797,6 +819,7 @@ void parametros_formais(TNo *rotina) {
     }
     consome(ATOMO_FECHA_PAR);
 
+    // Com n parâmetros, o i-ésimo fica em 1,-(n+3-i) e o retorno da função em 1,-(n+3)
     int n = endereco_atual;
     rotina->num_parametros = n;
     if (rotina->categoria == CAT_FUNCAO) {
@@ -840,7 +863,7 @@ void comando(void) {
         consome(ATOMO_IDENTIFICADOR);
         TNo *no = verifica_declarado(info);
         if (lookahead.atomo == ATOMO_ATRIBUICAO) {
-            // <comando_atribuição>
+            // <comando_atribuição> para variável, parâmetro ou retorno da função atual
             if (no->categoria != CAT_VARIAVEL && no->categoria != CAT_PARAMETRO &&
                 !(no->categoria == CAT_FUNCAO && no == rotina_atual)) {
                 erro_semantico(info.linha, info.atributo.id, "nao pode receber atribuicao");
@@ -916,6 +939,8 @@ void comando_saida(void) {
 void comando_condicional(void) {
     consome(ATOMO_SE);
     expressao();
+
+    // Se a expressão for falsa, desvia para o senao (ou para o fim do comando)
     int rotulo_senao = proximo_rotulo();
     gera("   DSVF L%d\n", rotulo_senao);
     consome(ATOMO_ENTAO);
@@ -934,6 +959,7 @@ void comando_condicional(void) {
 
 // <comando_repeticao> ::= enquanto <expressão> faca <comando>
 void comando_repeticao(void) {
+    // Testa a expressão no início de cada repetição e desvia para o fim quando for falsa
     int rotulo_inicio = proximo_rotulo();
     int rotulo_fim = proximo_rotulo();
     gera("L%d:NADA\n", rotulo_inicio);
@@ -957,6 +983,7 @@ int lista_expressao(TNo *rotina) {
     return qtd;
 }
 
+// Argumento de uma chamada: para parâmetro var empilha o endereço da variável, senão o valor da expressão
 void argumento(TNo *rotina, int indice) {
     if (indice < rotina->num_parametros && rotina->parametros_ref[indice]) {
         if (lookahead.atomo != ATOMO_IDENTIFICADOR) {
@@ -1021,6 +1048,7 @@ void expressao_simples(void) {
         else if (op == ATOMO_OP_SUB) gera("   SUBT\n");
         else if (op == ATOMO_OU) gera("   DISJ\n");
         else {
+            // mod: a MEPA não tem instrução de resto (ver readme)
             usa_mod = 1;
             gera("   ARMZ 0,%d\n", num_globais + 1);
             gera("   ARMZ 0,%d\n", num_globais);
@@ -1079,6 +1107,7 @@ void fator(void) {
         if (lookahead.atomo == ATOMO_ABRE_PAR && no->categoria != CAT_FUNCAO) {
             erro_semantico(info.linha, info.atributo.id, "nao e uma funcao");
         }
+        // Chamada de função: AMEM 1 reserva o espaço do valor de retorno
         if (no->categoria == CAT_FUNCAO) {
             gera("   AMEM 1\n");
             int qtd = 0;
@@ -1143,10 +1172,12 @@ int main(int argc, char *argv[]) {
         lookahead = obter_atomo();
     }
 
-    // Executa a análise sintática
+    // Executa a análise sintática, semântica e a geração de código
     programa();
 
     if (arquivo_fonte) fclose(arquivo_fonte);
+
+    // Sem erros: imprime o código MEPA e a Tabela de Símbolos
 
     imprime_codigo(stdout);
     grava_codigo(argv[1]);
