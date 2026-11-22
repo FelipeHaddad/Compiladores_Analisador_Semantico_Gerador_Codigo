@@ -115,6 +115,7 @@ typedef struct {
 
 FILE *arquivo_fonte = NULL;
 int linha_atual = 1;
+int linha_anterior = 1;
 TInfoAtomo lookahead;
 TTabelaSimbolos tabela;
 int escopo_atual = 0;
@@ -148,7 +149,8 @@ void libera_tabela(void);
 void gera(const char *formato, ...);
 int proximo_rotulo(void);
 void gera_armazena(TNo *no);
-void imprime_codigo(void);
+void imprime_codigo(FILE *saida);
+void grava_codigo(const char *nome_fonte);
 void libera_codigo(void);
 
 // Funções do ASDR para a Gramática EBNF de Portugol
@@ -251,7 +253,7 @@ void erro_lexico(const char *msg) {
 
 void erro_sintatico(TAtomo atomo_esperado, TInfoAtomo atomo_encontrado) {
     printf("# %2d:erro sintatico, esperado [%s] encontrado [%s]\n",
-           atomo_encontrado.linha,
+           atomo_encontrado.atomo == ATOMO_FIM_ARQUIVO ? linha_anterior : atomo_encontrado.linha,
            nome_atomo(atomo_esperado),
            nome_atomo(atomo_encontrado.atomo));
     if (arquivo_fonte) fclose(arquivo_fonte);
@@ -372,11 +374,28 @@ void gera_armazena(TNo *no) {
     }
 }
 
-void imprime_codigo(void) {
+void imprime_codigo(FILE *saida) {
     int total = num_globais + (usa_mod ? 2 : 0);
-    printf("   INPP\n");
-    if (total > 0) printf("   AMEM %d\n", total);
-    printf("%s", codigo);
+    fprintf(saida, "   INPP\n");
+    if (total > 0) fprintf(saida, "   AMEM %d\n", total);
+    fprintf(saida, "%s", codigo);
+}
+
+void grava_codigo(const char *nome_fonte) {
+    char nome[512];
+    const char *ponto = strrchr(nome_fonte, '.');
+    const char *barra = strrchr(nome_fonte, '/');
+    int tam = (int)strlen(nome_fonte);
+    if (ponto != NULL && (barra == NULL || ponto > barra)) {
+        tam = (int)(ponto - nome_fonte);
+    }
+    snprintf(nome, sizeof(nome), "%.*s.mepa", tam, nome_fonte);
+    if (strcmp(nome, nome_fonte) == 0) return;
+    FILE *arquivo = fopen(nome, "w");
+    if (arquivo) {
+        imprime_codigo(arquivo);
+        fclose(arquivo);
+    }
 }
 
 void libera_codigo(void) {
@@ -417,6 +436,7 @@ TInfoAtomo obter_atomo(void) {
                 while (1) {
                     int ch = fgetc(arquivo_fonte);
                     if (ch == EOF) {
+                        linha_atual = info.linha;
                         erro_lexico("comentario nao fechado ate o fim do arquivo");
                     }
                     if (ch == '\n') {
@@ -618,6 +638,7 @@ TInfoAtomo obter_atomo(void) {
     
 void consome(TAtomo atomo_esperado) {
     if (lookahead.atomo == atomo_esperado) {
+        linha_anterior = lookahead.linha;
         lookahead = obter_atomo();
         while (lookahead.atomo == ATOMO_COMENTARIO) {
             lookahead = obter_atomo();
@@ -1127,7 +1148,8 @@ int main(int argc, char *argv[]) {
 
     if (arquivo_fonte) fclose(arquivo_fonte);
 
-    imprime_codigo();
+    imprime_codigo(stdout);
+    grava_codigo(argv[1]);
     imprime_tabela();
     libera_tabela();
     libera_codigo();
