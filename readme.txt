@@ -1,32 +1,33 @@
 COMPILADOR PORTUGOL - FASE 2: ANÁLISE SEMÂNTICA E GERAÇÃO DE CÓDIGO MEPA
 
 Integrantes:
-  Arthur Roldan Slikta - 10353847
-  Felipe Haddad        - 10437372
+  Arthur Roldan Slikta   - 10353847
+  Felipe Bertacco Haddad - 10437372
 
 
 1. COMO COMPILAR E EXECUTAR
-O arquivo hash_mack.o deve estar na mesma pasta do compilador.c (Ubuntu 22.04).
+Deixar o hash_mack.o na mesma pasta do compilador.c e compilar com:
 
   gcc -Wall -Wno-unused-result -g -Og compilador.c hash_mack.o -o compilador
+
+Para executar:
+
   ./compilador <arquivo de entrada>
 
-Se o programa fonte não tiver erros, o compilador imprime na tela o código MEPA
-e, em seguida, a Tabela de Símbolos. O mesmo código MEPA também é gravado no
-arquivo <arquivo de entrada sem extensão>.mepa (ex.: teste.txt -> teste.mepa),
-que pode ser executado diretamente na máquina virtual da MEPA:
+Se não tiver erro no programa, o compilador mostra o código MEPA e depois a
+tabela de símbolos. O código MEPA também é salvo em um arquivo .mepa com o
+mesmo nome do arquivo de entrada (teste.txt gera teste.mepa), para rodar no
+interpretador:
 
   ./mepa -f teste.mepa
 
-Se o programa fonte tiver erro, é impresso somente o primeiro erro encontrado,
-com a linha e o tipo (lexico, sintatico ou semantico), e nenhum .mepa é gerado.
-Exemplos:
-  #  6:erro sintatico, esperado [.] encontrado [fim de arquivo]
+Se tiver erro, mostra só o primeiro erro com a linha e o tipo, por exemplo:
+
   #  5:erro semantico, identificador [z] nao declarado
 
-Para verificar a memória:
-  valgrind --leak-check=yes ./compilador <arquivo de entrada>
+Para testar a memória com o valgrind:
 
+  valgrind --leak-check=yes ./compilador <arquivo de entrada>
 
 2. O QUE FOI CONCLUÍDO
 - Análise léxica e sintática da fase 1 (sem a impressão dos átomos).
@@ -50,7 +51,7 @@ Para verificar a memória:
   - número de argumentos igual ao número de parâmetros;
   - argumento de parâmetro por referência (var) deve ser uma variável ou
     parâmetro.
-- Geração de código MEPA (Aulas 5 a 8):
+- Geração de código MEPA:
   - programa: INPP, AMEM, DSVS para o programa principal, rotinas, DMEM e PARA;
   - expressões aritméticas, relacionais e lógicas (SOMA, SUBT, MULT, DIVI,
     INVR, CONJ, DISJ, NEGA, CMIG, CMDG, CMME, CMEG, CMMA, CMAG), constantes
@@ -61,8 +62,6 @@ Para verificar a memória:
     referência e recursão (ENPR, AMEM, DMEM, RTPR n, CHPR, CREN, CRVI, ARMI).
     O i-ésimo de n parâmetros fica no endereço 1,-(n+3-i) e o retorno da função
     em 1,-(n+3). A chamada de função reserva o retorno com AMEM 1.
-- Testes na pasta testes/ (ver seção 5).
-
 
 3. DECISÕES DE PROJETO
 - Escopo na Tabela de Símbolos: ao terminar uma função ou procedimento, as
@@ -89,7 +88,7 @@ Para verificar a memória:
   a - (a div b) * b. Para isso são usadas duas posições auxiliares no fim da área
   das variáveis globais (0,n e 0,n+1, onde n é o número de variáveis globais),
   reservadas no AMEM inicial somente se o programa usa mod.
-- Tipos: conforme o enunciado, não há distinção entre expressões inteiras e
+- Tipos: não há distinção entre expressões inteiras e
   lógicas. verdadeiro e falso são gerados como CRCT 1 e CRCT 0 e uma constante
   caractere é gerada com o seu código ASCII (ex.: 'A' -> CRCT 65).
 - Função ou procedimento sem parâmetros é chamado sem parênteses (ex.: p; ou

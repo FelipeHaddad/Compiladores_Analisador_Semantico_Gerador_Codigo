@@ -277,7 +277,7 @@ void erro_semantico(int linha, const char *id, const char *msg) {
 
 //   TABELA DE SÍMBOLOS
 
-// Insere o identificador no início da lista da sua entrada (erro se já existe no mesmo escopo)
+// Insere o identificador no início da lista de entrada (erro se já existe no mesmo escopo)
 TNo* insere(char *id, TCategoria categoria, int endereco, int linha) {
     int entrada = hashMack(id);
     for (TNo *no = tabela.entradas[entrada]; no != NULL; no = no->prox) {
@@ -354,7 +354,7 @@ void libera_tabela(void) {
 
 //   GERAÇÃO DE CÓDIGO MEPA
 
-// Acrescenta uma instrução MEPA no buffer de código (mesmo formato do printf)
+// Acrescenta uma instrução MEPA no buffer de código
 void gera(const char *formato, ...) {
     char linha[64];
     va_list args;
@@ -373,7 +373,7 @@ int proximo_rotulo(void) {
     return ++rotulo_atual;
 }
 
-// Armazena o topo da pilha no identificador (retorno de função, parâmetro var ou variável)
+// Armazena o topo da pilha no identificador
 void gera_armazena(TNo *no) {
     if (no->categoria == CAT_FUNCAO) {
         gera("   ARMZ 1,%d\n", no->endereço);
@@ -392,7 +392,7 @@ void imprime_codigo(FILE *saida) {
     fprintf(saida, "%s", codigo);
 }
 
-// Grava o código MEPA no arquivo <nome do fonte sem extensão>.mepa
+// Grava o código MEPA
 void grava_codigo(const char *nome_fonte) {
     char nome[512];
     const char *ponto = strrchr(nome_fonte, '.');
@@ -940,7 +940,6 @@ void comando_condicional(void) {
     consome(ATOMO_SE);
     expressao();
 
-    // Se a expressão for falsa, desvia para o senao (ou para o fim do comando)
     int rotulo_senao = proximo_rotulo();
     gera("   DSVF L%d\n", rotulo_senao);
     consome(ATOMO_ENTAO);
